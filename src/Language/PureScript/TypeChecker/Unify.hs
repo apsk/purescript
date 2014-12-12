@@ -25,7 +25,8 @@ module Language.PureScript.TypeChecker.Unify (
     varIfUnknown
 ) where
 
-import Data.List (nub, sort)
+import Data.Ord (comparing)
+import Data.List (nub, sort, sortBy)
 import Data.Maybe (fromMaybe)
 import Data.Monoid
 import qualified Data.HashMap.Strict as H
@@ -40,6 +41,8 @@ import Language.PureScript.TypeChecker.Monad
 import Language.PureScript.TypeChecker.Skolems
 import Language.PureScript.TypeChecker.Synonyms
 import Language.PureScript.Types
+
+import Debug.Trace
 
 instance Partial Type where
   unknown = TUnknown
@@ -149,6 +152,19 @@ unifiesWith e (SaturatedTypeSynonym name args) t2 =
     Left  _  -> False
     Right t1 -> unifiesWith e t1 t2
 unifiesWith e t1 t2@(SaturatedTypeSynonym _ _) = unifiesWith e t2 t1
+unifiesWith _ REmpty REmpty = True
+unifiesWith e r1@(RCons _ _ _) r2@(RCons _ _ _)
+    -- !!! TUnknown 11589, Skolem "r" 11578 (SkolemScope {runSkolemScope = 11577})
+    | not (unifiesWith e r1' r2') = trace ("!!! " ++ show r1' ++ ", " ++ show r2') False
+    | otherwise = match (sortBy cmp s1) (sortBy cmp s2)
+  where
+    cmp = comparing fst
+    (s1, r1') = rowToList r1
+    (s2, r2') = rowToList r2
+    match [] [] = True
+    match ((name1, ty1):tys1) ((name2, ty2):tys2) =
+      name1 == name2 && unifiesWith e ty1 ty2 && match tys1 tys2
+    match _ _ = False
 unifiesWith _ _ _ = False
 
 -- |
@@ -158,7 +174,7 @@ replaceVarWithUnknown :: String -> Type -> UnifyT Type Check Type
 replaceVarWithUnknown ident ty = do
   tu <- fresh
   return $ replaceTypeVars ident tu ty
-  
+
 -- |
 -- Replace type wildcards with unknowns
 --
